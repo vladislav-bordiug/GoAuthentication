@@ -1,0 +1,91 @@
+definitions:
+  models.Request:
+    properties:
+      email:
+        example: to@example.com
+        type: string
+      guid:
+        example: 1
+        type: integer
+    required:
+    - email
+    - guid
+    type: object
+  models.Response:
+    properties:
+      access_token:
+        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+        type: string
+      refresh_token:
+        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+        type: string
+    required:
+    - access_token
+    - refresh_token
+    type: object
+info:
+  contact: {}
+  description: This is a sample server for getting and refreshing access and refresh
+    JWT tokens
+  title: Go Authentication JWT
+  version: "1.0"
+paths:
+  /create:
+    post:
+      consumes:
+      - application/json
+      description: Create access and refresh tokens by user's GUID and E-Mail
+      parameters:
+      - description: JSON with GUID and E-Mail
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/models.Request'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Response'
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      summary: Create tokens
+      tags:
+      - tokens
+  /refresh:
+    get:
+      description: Refresh access and refresh tokens by refresh token
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.Response'
+        "400":
+          description: Bad Request
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      security:
+      - X-Refresh-Token: []
+      summary: Refresh tokens
+      tags:
+      - tokens
+securityDefinitions:
+  X-Refresh-Token:
+    in: header
+    name: X-Refresh-Token
+    type: apiKey
+swagger: "2.0"
