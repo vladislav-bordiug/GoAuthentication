@@ -23,7 +23,7 @@
 Документация в [docs.go](docs/docs.go), [swagger.json](docs/swagger.json) и [swagger.yaml](docs/swagger.yaml).
 
 ## Маршруты
-+ /create - обработчик CreateTokens, создает access и refresh JWT токены по передаваемым в JSON guid и email, метод POST.
++ /create - обработчик CreateTokens, создает access и refresh JWT токены (refresh тоже JWT, т.к. его нельзя изменить на стороне клиента и подделать, секрет известен только серверу) по передаваемым в JSON guid и email, метод POST.
 + /refresh - обработчик RefreshTokens, рефрешит access и refresh токены по переданному refresh токену в заголовке X-Refresh-Token, помечает в таблице как used (по id) и выдает новые, метод GET.
 
 ## База данных
