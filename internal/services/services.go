@@ -153,6 +153,9 @@ func (s *Service) Refresh(currentrefresh string, ipaddress string) (string, stri
 		_ = dialer.DialAndSend(message)
 	}
 	access, refresh, err := s.Generatetokens(guid, ipaddress, email)
+	if err != nil {
+		return "", "", err, http.StatusInternalServerError
+	}
 	if err = s.database.SetStatusTokenQuery(context.Background(), id, "used"); err != nil {
 		return "", "", err, http.StatusInternalServerError
 	}
