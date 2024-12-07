@@ -29,6 +29,9 @@ info:
     JWT tokens
   title: Go Authentication JWT
   version: "1.0"
+servers:
+  - url: "http://localhost:8080"
+    description: "Main API server"
 paths:
   /create:
     post:

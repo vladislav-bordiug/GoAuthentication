@@ -159,5 +159,5 @@ func (s *Service) Refresh(currentrefresh string, ipaddress string) (string, stri
 	if err = s.database.SetStatusTokenQuery(context.Background(), id, "used"); err != nil {
 		return "", "", err, http.StatusInternalServerError
 	}
-	return access, refresh, nil, 200
+	return access, refresh, nil, http.StatusOK
 }
