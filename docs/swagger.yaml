@@ -1,23 +1,27 @@
 definitions:
-  models.Request:
+  models.CurrentUserResponse:
     properties:
-      email:
-        example: to@example.com
-        type: string
       guid:
         example: 1
         type: integer
     required:
-    - email
+    - guid
+    type: object
+  models.Request:
+    properties:
+      guid:
+        example: 1
+        type: integer
+    required:
     - guid
     type: object
   models.Response:
     properties:
       access_token:
-        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+        example: eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDYzOTY5ODEsImd1aWQiOjEsImlkIjo0LCJpcCI6IjE3Mi4xOC4wLjEiLCJ0eXBlIjoiYWNjZXNzIiwidWEiOiJNb3ppbGxhLzUuMCAoV2luZG93cyBOVCAxMC4wOyBXaW42NDsgeDY0KSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTM1LjAuMC4wIFNhZmFyaS81MzcuMzYifQ.0xbb2C65uji1yPjQG4xz4eSGwd4J813F1vAkVBThzgJPRuuvR-mdClD9N2zljVPcFJ01XlB-q6AYBvXZui6Eqg
         type: string
       refresh_token:
-        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+        example: 2nNAhnaawM5P1z8vKMXk9jvkSuuqUjoMWWEV1w/TqnM=
         type: string
     required:
     - access_token
@@ -29,19 +33,17 @@ info:
     JWT tokens
   title: Go Authentication JWT
   version: "1.0"
-servers:
-  - url: "http://localhost:8080"
-    description: "Main API server"
 paths:
   /create:
     post:
       consumes:
       - application/json
-      description: Create access and refresh tokens by user's GUID and E-Mail
+      description: Generate a new pair of tokens (access JWT and refresh base64) for
+        a given user GUID
       parameters:
-      - description: JSON with GUID and E-Mail
+      - description: Request body with user GUID
         in: body
-        name: data
+        name: req
         required: true
         schema:
           $ref: '#/definitions/models.Request'
@@ -49,7 +51,7 @@ paths:
       - application/json
       responses:
         "200":
-          description: OK
+          description: Newly generated tokens
           schema:
             $ref: '#/definitions/models.Response'
         "400":
@@ -60,33 +62,101 @@ paths:
           description: Internal Server Error
           schema:
             type: string
-      summary: Create tokens
+      summary: Create access and refresh tokens
       tags:
-      - tokens
-  /refresh:
+      - auth
+  /logout:
+    post:
+      description: Invalidate all refresh tokens for the current user
+      parameters:
+      - description: Bearer access token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            type: string
+      summary: Logout user (deauthorize)
+      tags:
+      - auth
+  /me:
     get:
-      description: Refresh access and refresh tokens by refresh token
+      description: Retrieve the GUID of the currently authenticated user
+      parameters:
+      - description: Bearer access token
+        in: header
+        name: Authorization
+        required: true
+        type: string
       produces:
       - application/json
       responses:
         "200":
-          description: OK
+          description: User GUID
+          schema:
+            $ref: '#/definitions/models.CurrentUserResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
+      summary: Get current user GUID
+      tags:
+      - auth
+  /refresh:
+    post:
+      description: Refresh an existing pair of tokens by providing valid access JWT
+        and refresh token
+      parameters:
+      - description: Bearer access token
+        in: header
+        name: Authorization
+        required: true
+        type: string
+      - description: Refresh token in base64
+        in: header
+        name: X-Refresh-Token
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Newly refreshed tokens
           schema:
             $ref: '#/definitions/models.Response'
         "400":
           description: Bad Request
           schema:
             type: string
+        "401":
+          description: Unauthorized
+          schema:
+            type: string
         "500":
           description: Internal Server Error
           schema:
             type: string
-      security:
-      - X-Refresh-Token: []
       summary: Refresh tokens
       tags:
-      - tokens
+      - auth
 securityDefinitions:
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
   X-Refresh-Token:
     in: header
     name: X-Refresh-Token

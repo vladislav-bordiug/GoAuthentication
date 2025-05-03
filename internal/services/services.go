@@ -2,162 +2,179 @@ package services
 
 import (
 	"GoAuthentication/internal/database"
+	"GoAuthentication/internal/models"
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
-	gomail "gopkg.in/mail.v2"
 	"net/http"
 	"strings"
 	"time"
 )
 
+type ServiceInterface interface {
+	GenerateTokens(guid int, ip, ua string) (accessJWT, refreshBase64 string, err error)
+	RefreshTokens(accessBearer, refreshB64, ip, ua string) (newAccess, newRefresh string, status int, err error)
+	Logout(guid int) error
+	ValidateAccess(accessBearer string) (guid int, err error)
+}
+
 type Service struct {
-	database  database.Database
-	secret    string
-	mailuser  string
-	mailpass  string
-	fromemail string
+	db         database.Database
+	secret     string
+	webhookURL string
 }
 
-func NewService(db database.Database, secret string, mailuser string, mailpass string, fromemail string) *Service {
-	return &Service{database: db, secret: secret, mailuser: mailuser, mailpass: mailpass, fromemail: fromemail}
+func NewService(db database.Database, secret string, webhookURL string) *Service {
+	return &Service{db: db, secret: secret, webhookURL: webhookURL}
 }
 
-func (s *Service) Generatetokens(guid int, ipaddress string, email string) (accessToken string, refreshToken string, err error) {
-	id, err := s.database.InsertTokenQuery(context.Background())
-	if err != nil {
-		return "", "", err
+func (s *Service) ValidateAccess(accessBearer string) (int, error) {
+	parts := strings.SplitN(accessBearer, " ", 2)
+	if len(parts) != 2 || parts[0] != "Bearer" {
+		return 0, errors.New("Invalid Authorization header")
 	}
-	payloadaccess := jwt.MapClaims{
-		"guid":  guid,
-		"email": email,
-		"exp":   time.Now().Add(time.Hour * 24).Unix(),
-		"ip":    ipaddress,
-		"type":  "access",
-		"id":    id,
-	}
-	accesstoken := jwt.NewWithClaims(jwt.SigningMethodHS512, payloadaccess)
-	access, err := accesstoken.SignedString([]byte(s.secret))
-	if err != nil {
-		return "", "", err
-	}
-	payloadrefresh := jwt.MapClaims{
-		"guid":  guid,
-		"email": email,
-		"exp":   time.Now().Add(time.Hour * 24 * 10).Unix(),
-		"ip":    ipaddress,
-		"type":  "refresh",
-		"id":    id,
-	}
-	refreshtoken := jwt.NewWithClaims(jwt.SigningMethodHS256, payloadrefresh)
-	refresh, err := refreshtoken.SignedString([]byte(s.secret))
-	if err != nil {
-		return "", "", err
-	}
-	parts := strings.Split(refresh, ".")
-	if len(parts) != 3 {
-		return "", "", errors.New("Invalid token format")
-	}
-	sign := parts[2]
-	sign, err = makebcrypt(sign)
-	if err != nil {
-		return "", "", err
-	}
-	if err = s.database.UpdateTokenQuery(context.Background(), id, sign); err != nil {
-		return "", "", err
-	}
-	return access, refresh, nil
-}
+	tokenStr := parts[1]
 
-func (s *Service) extractClaims(tokenStr string) (jwt.MapClaims, bool) {
-	hmacSecretString := s.secret
-	hmacSecret := []byte(hmacSecretString)
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		return hmacSecret, nil
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if t.Method != jwt.SigningMethodHS512 {
+			return nil, errors.New("Unexpected signing method")
+		}
+		return []byte(s.secret), nil
 	})
+	if err != nil || !token.Valid {
+		return 0, errors.New("Invalid access token")
+	}
+	claims := token.Claims.(jwt.MapClaims)
+
+	if claims["type"] != "access" {
+		return 0, errors.New("Not an access token")
+	}
+
+	idFloat, _ := claims["id"].(float64)
+	id := int(idFloat)
+	_, status, err := s.db.GetRefresh(context.Background(), id)
 	if err != nil {
-		return nil, false
+		return 0, err
 	}
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		return claims, true
-	} else {
-		return nil, false
+	if status == "blocked" {
+		return 0, errors.New("Token revoked")
 	}
+
+	guidFloat, _ := claims["guid"].(float64)
+	return int(guidFloat), nil
 }
 
-func makebcrypt(fresh string) (string, error) {
-	bytes, err := bcrypt.GenerateFromPassword([]byte(fresh), bcrypt.DefaultCost)
-	return string(bytes), err
+func (s *Service) GenerateTokens(guid int, ip, ua string) (accessJWT, refreshBase64 string, err error) {
+	id, err := s.db.InsertToken(context.Background(), guid)
+	if err != nil {
+		return "", "", err
+	}
+
+	claims := jwt.MapClaims{
+		"guid": guid,
+		"exp":  time.Now().Add(24 * time.Hour).Unix(),
+		"ip":   ip,
+		"ua":   ua,
+		"id":   id,
+		"type": "access",
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS512, claims)
+	accessJWT, err = token.SignedString([]byte(s.secret))
+	if err != nil {
+		return "", "", err
+	}
+
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", "", err
+	}
+	refreshBase64 = base64.StdEncoding.EncodeToString(raw)
+
+	hash, err := bcrypt.GenerateFromPassword(raw, bcrypt.DefaultCost)
+	if err != nil {
+		return "", "", err
+	}
+	if err := s.db.StoreRefresh(context.Background(), id, string(hash)); err != nil {
+		return "", "", err
+	}
+
+	return accessJWT, refreshBase64, nil
 }
 
-func checkbcrypt(receivedrefresh string, databaserefresh string) error {
-	password := []byte(receivedrefresh)
-	hashedPassword := []byte(databaserefresh)
-	err := bcrypt.CompareHashAndPassword(hashedPassword, password)
-	return err
+func (s *Service) RefreshTokens(accessBearer, refreshB64, ip, ua string) (newAccess, newRefresh string, status int, err error) {
+	parts := strings.SplitN(accessBearer, " ", 2)
+	if len(parts) != 2 {
+		return "", "", http.StatusBadRequest, errors.New("Invalid Authorization header")
+	}
+	tokenStr := parts[1]
+	token, err := jwt.Parse(tokenStr, func(t *jwt.Token) (interface{}, error) {
+		if t.Method != jwt.SigningMethodHS512 {
+			return nil, errors.New("Unexpected signing method")
+		}
+		return []byte(s.secret), nil
+	})
+	if err != nil || !token.Valid {
+		return "", "", http.StatusUnauthorized, errors.New("Invalid access token")
+	}
+	claims := token.Claims.(jwt.MapClaims)
+
+	if claims["type"] != "access" {
+		return "", "", http.StatusBadRequest, errors.New("Not an access token")
+	}
+	id := int(claims["id"].(float64))
+	origUA := claims["ua"].(string)
+	origIP := claims["ip"].(string)
+	guid := int(claims["guid"].(float64))
+
+	if ua != origUA {
+		s.db.InvalidateAllRefreshForGUID(context.Background(), guid)
+		return "", "", http.StatusUnauthorized, errors.New("User-Agent mismatch — you have been logged out")
+	}
+
+	storedHash, statusDB, err := s.db.GetRefresh(context.Background(), id)
+	if err != nil {
+		return "", "", http.StatusInternalServerError, err
+	}
+	if statusDB != "unused" {
+		return "", "", http.StatusBadRequest, errors.New("Refresh token already used or blocked")
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(refreshB64)
+	if err != nil {
+		return "", "", http.StatusBadRequest, errors.New("Invalid base64")
+	}
+	if bcrypt.CompareHashAndPassword([]byte(storedHash), raw) != nil {
+		return "", "", http.StatusUnauthorized, errors.New("Invalid refresh token")
+	}
+
+	if ip != origIP {
+		go func() {
+			payload := models.IPChangeRequest{
+				GUID:     guid,
+				FromIP:   origIP,
+				NewIP:    ip,
+				DateTime: time.Now().UTC(),
+			}
+			b, _ := json.Marshal(payload)
+			http.Post(s.webhookURL, "application/json", bytes.NewReader(b))
+		}()
+	}
+
+	s.db.MarkRefreshUsed(context.Background(), id)
+
+	access, refresh, genErr := s.GenerateTokens(guid, ip, ua)
+	if genErr != nil {
+		return "", "", http.StatusInternalServerError, genErr
+	}
+
+	return access, refresh, http.StatusOK, nil
 }
 
-func (s *Service) Refresh(currentrefresh string, ipaddress string) (string, string, error, int) {
-	claims, ok := s.extractClaims(currentrefresh)
-	if !ok {
-		return "", "", errors.New("Invalid JWT Token"), http.StatusBadRequest
-	}
-	d, ok := claims["id"].(float64)
-	if !ok {
-		return "", "", errors.New("Invalid id in token"), http.StatusBadRequest
-	}
-	id := int(d)
-	typee, ok := claims["type"].(string)
-	if !ok {
-		return "", "", errors.New("Invalid type in token"), http.StatusBadRequest
-	}
-	ip, ok := claims["ip"].(string)
-	if !ok {
-		return "", "", errors.New("Invalid ip in token"), http.StatusBadRequest
-	}
-	gid, ok := claims["guid"].(float64)
-	if !ok {
-		return "", "", errors.New("Invalid guid in token"), http.StatusBadRequest
-	}
-	guid := int(gid)
-	email, ok := claims["email"].(string)
-	if !ok {
-		return "", "", errors.New("Invalid email in token"), http.StatusBadRequest
-	}
-	if typee != "refresh" {
-		return "", "", errors.New("This is not a refresh token"), http.StatusBadRequest
-	}
-	dbrefresh, status, err := s.database.SelectRefreshTokenQuery(context.Background(), id)
-	if err != nil {
-		return "", "", err, http.StatusInternalServerError
-	}
-	if status != "unused" {
-		return "", "", errors.New("Refresh token was used or blocked"), http.StatusBadRequest
-	}
-	parts := strings.Split(currentrefresh, ".")
-	if len(parts) != 3 {
-		return "", "", errors.New("Invalid token format"), http.StatusBadRequest
-	}
-	refresh := parts[2]
-	if err = checkbcrypt(refresh, dbrefresh); err != nil {
-		return "", "", err, http.StatusBadRequest
-	}
-	if ipaddress != ip {
-		message := gomail.NewMessage()
-		message.SetHeader("From", s.fromemail)
-		message.SetHeader("To", email)
-		message.SetHeader("Subject", "IP address has changed")
-		message.SetBody("text/plain", "Your IP address has changed")
-		dialer := gomail.NewDialer("sandbox.smtp.mailtrap.io", 2525, s.mailuser, s.mailpass)
-		_ = dialer.DialAndSend(message)
-	}
-	access, refresh, err := s.Generatetokens(guid, ipaddress, email)
-	if err != nil {
-		return "", "", err, http.StatusInternalServerError
-	}
-	if err = s.database.SetStatusTokenQuery(context.Background(), id, "used"); err != nil {
-		return "", "", err, http.StatusInternalServerError
-	}
-	return access, refresh, nil, http.StatusOK
+func (s *Service) Logout(guid int) error {
+	return s.db.InvalidateAllRefreshForGUID(context.Background(), guid)
 }

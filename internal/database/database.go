@@ -7,16 +7,16 @@ import (
 )
 
 type Database interface {
-	CreateTableQuery(ctx context.Context) error
-	InsertTokenQuery(ctx context.Context) (int, error)
-	UpdateTokenQuery(ctx context.Context, id int, refreshtoken string) error
-	SetStatusTokenQuery(ctx context.Context, id int, status string) error
-	SelectRefreshTokenQuery(ctx context.Context, id int) (string, string, error)
+	InsertToken(ctx context.Context, guid int) (int, error)
+	StoreRefresh(ctx context.Context, id int, hash string) error
+	GetRefresh(ctx context.Context, id int) (hash, status string, err error)
+	MarkRefreshUsed(ctx context.Context, id int) error
+	InvalidateAllRefreshForGUID(ctx context.Context, guid int) error
 }
 
 type DBPool interface {
-	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
-	QueryRow(ctx context.Context, sql string, arguments ...interface{}) pgx.Row
+	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
 }
 
 type PGXDatabase struct {
@@ -27,30 +27,44 @@ func NewPGXDatabase(pool DBPool) *PGXDatabase {
 	return &PGXDatabase{pool: pool}
 }
 
-func (db *PGXDatabase) CreateTableQuery(ctx context.Context) error {
-	_, err := db.pool.Exec(ctx, "CREATE TABLE IF NOT EXISTS tokens (id SERIAL PRIMARY KEY, refreshhash TEXT, status TEXT);")
+func (db *PGXDatabase) InsertToken(ctx context.Context, guid int) (int, error) {
+	var id int
+	err := db.pool.QueryRow(ctx,
+		"INSERT INTO tokens(guid, refresh_hash, status, ua, ip) VALUES($1, '', 'unused', '', '') RETURNING id",
+		guid,
+	).Scan(&id)
+	return id, err
+}
+
+func (db *PGXDatabase) StoreRefresh(ctx context.Context, id int, hash string) error {
+	_, err := db.pool.Exec(ctx,
+		"UPDATE tokens SET refresh_hash=$1, status='unused' WHERE id=$2",
+		hash, id,
+	)
 	return err
 }
 
-func (db *PGXDatabase) InsertTokenQuery(ctx context.Context) (int, error) {
-	var ID int
-	err := db.pool.QueryRow(ctx, "INSERT INTO tokens(status) values($1) RETURNING id", "unused").Scan(&ID)
-	return ID, err
+func (db *PGXDatabase) GetRefresh(ctx context.Context, id int) (string, string, error) {
+	var hash, status string
+	err := db.pool.QueryRow(ctx,
+		"SELECT refresh_hash, status FROM tokens WHERE id=$1",
+		id,
+	).Scan(&hash, &status)
+	return hash, status, err
 }
 
-func (db *PGXDatabase) UpdateTokenQuery(ctx context.Context, id int, refreshtoken string) error {
-	_, err := db.pool.Exec(ctx, "UPDATE tokens SET refreshhash = $1 WHERE id = $2", refreshtoken, id)
+func (db *PGXDatabase) MarkRefreshUsed(ctx context.Context, id int) error {
+	_, err := db.pool.Exec(ctx,
+		"UPDATE tokens SET status='used' WHERE id=$1",
+		id,
+	)
 	return err
 }
 
-func (db *PGXDatabase) SetStatusTokenQuery(ctx context.Context, id int, status string) error {
-	_, err := db.pool.Exec(ctx, "UPDATE tokens SET status = $1 WHERE id = $2", status, id)
+func (db *PGXDatabase) InvalidateAllRefreshForGUID(ctx context.Context, guid int) error {
+	_, err := db.pool.Exec(ctx,
+		"UPDATE tokens SET status='blocked' WHERE guid=$1",
+		guid,
+	)
 	return err
-}
-
-func (db *PGXDatabase) SelectRefreshTokenQuery(ctx context.Context, id int) (string, string, error) {
-	refresh := ""
-	status := ""
-	err := db.pool.QueryRow(ctx, "SELECT refreshhash, status FROM tokens WHERE id = $1", id).Scan(&refresh, &status)
-	return refresh, status, err
 }

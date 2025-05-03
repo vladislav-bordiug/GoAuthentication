@@ -17,7 +17,7 @@ const docTemplate = `{
     "paths": {
         "/create": {
             "post": {
-                "description": "Create access and refresh tokens by user's GUID and E-Mail",
+                "description": "Generate a new pair of tokens (access JWT and refresh base64) for a given user GUID",
                 "consumes": [
                     "application/json"
                 ],
@@ -25,13 +25,13 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "tokens"
+                    "auth"
                 ],
-                "summary": "Create tokens",
+                "summary": "Create access and refresh tokens",
                 "parameters": [
                     {
-                        "description": "JSON with GUID and E-Mail",
-                        "name": "data",
+                        "description": "Request body with user GUID",
+                        "name": "req",
                         "in": "body",
                         "required": true,
                         "schema": {
@@ -41,7 +41,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "Newly generated tokens",
                         "schema": {
                             "$ref": "#/definitions/models.Response"
                         }
@@ -61,30 +61,123 @@ const docTemplate = `{
                 }
             }
         },
-        "/refresh": {
-            "get": {
-                "security": [
-                    {
-                        "X-Refresh-Token": []
-                    }
-                ],
-                "description": "Refresh access and refresh tokens by refresh token",
+        "/logout": {
+            "post": {
+                "description": "Invalidate all refresh tokens for the current user",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "tokens"
+                    "auth"
                 ],
-                "summary": "Refresh tokens",
+                "summary": "Logout user (deauthorize)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer access token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/me": {
+            "get": {
+                "description": "Retrieve the GUID of the currently authenticated user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Get current user GUID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer access token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "User GUID",
+                        "schema": {
+                            "$ref": "#/definitions/models.CurrentUserResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "/refresh": {
+            "post": {
+                "description": "Refresh an existing pair of tokens by providing valid access JWT and refresh token",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Refresh tokens",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Bearer access token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Refresh token in base64",
+                        "name": "X-Refresh-Token",
+                        "in": "header",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Newly refreshed tokens",
                         "schema": {
                             "$ref": "#/definitions/models.Response"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "type": "string"
                         }
@@ -100,17 +193,24 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "models.Request": {
+        "models.CurrentUserResponse": {
             "type": "object",
             "required": [
-                "email",
                 "guid"
             ],
             "properties": {
-                "email": {
-                    "type": "string",
-                    "example": "to@example.com"
-                },
+                "guid": {
+                    "type": "integer",
+                    "example": 1
+                }
+            }
+        },
+        "models.Request": {
+            "type": "object",
+            "required": [
+                "guid"
+            ],
+            "properties": {
                 "guid": {
                     "type": "integer",
                     "example": 1
@@ -126,16 +226,21 @@ const docTemplate = `{
             "properties": {
                 "access_token": {
                     "type": "string",
-                    "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+                    "example": "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NDYzOTY5ODEsImd1aWQiOjEsImlkIjo0LCJpcCI6IjE3Mi4xOC4wLjEiLCJ0eXBlIjoiYWNjZXNzIiwidWEiOiJNb3ppbGxhLzUuMCAoV2luZG93cyBOVCAxMC4wOyBXaW42NDsgeDY0KSBBcHBsZVdlYktpdC81MzcuMzYgKEtIVE1MLCBsaWtlIEdlY2tvKSBDaHJvbWUvMTM1LjAuMC4wIFNhZmFyaS81MzcuMzYifQ.0xbb2C65uji1yPjQG4xz4eSGwd4J813F1vAkVBThzgJPRuuvR-mdClD9N2zljVPcFJ01XlB-q6AYBvXZui6Eqg"
                 },
                 "refresh_token": {
                     "type": "string",
-                    "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+                    "example": "2nNAhnaawM5P1z8vKMXk9jvkSuuqUjoMWWEV1w/TqnM="
                 }
             }
         }
     },
     "securityDefinitions": {
+        "BearerAuth": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        },
         "X-Refresh-Token": {
             "type": "apiKey",
             "name": "X-Refresh-Token",

@@ -1,39 +1,49 @@
-# Authentication service
+# Сервис аутентификации
 
-## Environment variables
-Variables are stored in [.env](.env) file.
-+ ```DATABASE_URL``` - PostgresSQL database URL
-+ ```SECRET_KEY``` - secret key for JWT token generation
-+ ```SERVER_IP``` - server IP in ListenAndServe
-+  ```SERVER_PORT``` server port in ListenAndServe
-+  ```MAILTRAP_USERNAME``` - username from Mailtrap
-+  ```MAILTRAP_PASSWORD``` - password from Mailtrap
-+  ```FROM_EMAIL``` - the email we use to send emails in Mailtrap
+## Как запустить
 
-## Deployment
-[Dockerfile](Dockerfile) for server, server and database are deployed with [docker-compose.yml](docker-compose.yml).
+Для запуска нужно в терминале в корне проекта ввести:
 
-## Module tests
-Tests are in [database_test.go](internal/database/database_test.go), [services_test.go](internal/services/services_test.go) and [handlers_test.go](internal/transport/rest/handlers_test.go).
+```docker-compose -f docker-compose.yml up -d```
 
-80%+ coverage.
+Swagger UI после запуска будет доступен на:
 
-![img.png](img.png)
+http://localhost:8080/swagger/index.html
 
-## Documentation
-Documentation is in [docs.go](docs/docs.go), [swagger.json](docs/swagger.json) and [swagger.yaml](docs/swagger.yaml).
+## Переменные окружения
+Переменные хранятся в [.env](.env) файле.
++ ```DATABASE_PORT``` - порт базы данных
++ ```DATABASE_USER``` - имя пользователя бд
++ ```DATABASE_PASSWORD``` - пароль пользователя бд
++  ```DATABASE_NAME``` - имя базы данных
++  ```DATABASE_HOST``` - имя хоста базы данных
++  ```SECRET_KEY``` - секрет для генерации подписей JWT токенов
++  ```SERVER_IP``` - IP сервера
++  ```SERVER_PORT``` - порт сервера
++  ```WEBHOOK_URL``` - url куда отправляются вебхуки при смене IP пользователя
 
-## Routes
-+ /create - the CreateTokens handler generates JWT access and refresh tokens using user's email and guid.
-+ /refresh - the RefreshTokens handler refreshes access and refresh tokens using the refresh token received in the X-Refresh-Token header.
+## Деплой
+[Dockerfile](Dockerfile) для сервера, сервер и бд развертываются в [docker-compose.yml](docker-compose.yml).
 
-## Database
-Database stores:
-+ token id (the same for access and refresh tokens)
-+ bcrypt hash of JWT refresh token sign 
-+ status (used, unused, blocked and so on).
+## Документация
+Документация в [docs.go](docs/docs.go), [swagger.json](docs/swagger.json) and [swagger.yaml](docs/swagger.yaml).
 
-## Sending email when the user changes IP
+## Маршрути
++ /create - создать пару access и refresh токенов
++ /refresh - обновить пару токенов
++ /logout - деавторизация пользователя, блокирует все токены
++ /me - получение GUID текущего пользователя
 
-When the IP address changes, the email is sent via Mailtrap.
-![img_1.png](img_1.png)
+В маршрутах /logout и /me проверяется access токен, в том числе на статус не "blocked" в бд по id.
+
+В маршруте /refresh также проверяется статус на не "blocked" и не "used" по id.
+
+## База данных
+База данных хранит:
++ id токена (одинаковый для access и refresh токенов)
++ guid пользователя
++ bcrypt хэш refresh токена
++ status (used, unused, blocked)
++ ua - User Agent
++ ip - IP пользователя
++ created_at - время создания
