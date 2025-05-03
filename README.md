@@ -10,6 +10,12 @@ Swagger UI после запуска будет доступен на:
 
 http://localhost:8080/swagger/index.html
 
+## Токены
+
+Access JWT token с подписью SHA512.
+
+Refresh token генерируется как base64 представление 32 случайных байтов.
+
 ## Переменные окружения
 Переменные хранятся в [.env](.env) файле.
 + ```DATABASE_PORT``` - порт базы данных
