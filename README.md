@@ -50,6 +50,3 @@ Refresh token генерируется как base64 представление 
 + guid пользователя
 + bcrypt хэш refresh токена
 + status (used, unused, blocked)
-+ ua - User Agent
-+ ip - IP пользователя
-+ created_at - время создания

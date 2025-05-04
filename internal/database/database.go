@@ -30,7 +30,7 @@ func NewPGXDatabase(pool DBPool) *PGXDatabase {
 func (db *PGXDatabase) InsertToken(ctx context.Context, guid int) (int, error) {
 	var id int
 	err := db.pool.QueryRow(ctx,
-		"INSERT INTO tokens(guid, refresh_hash, status, ua, ip) VALUES($1, '', 'unused', '', '') RETURNING id",
+		"INSERT INTO tokens(guid, refresh_hash, status) VALUES($1, '', 'unused') RETURNING id",
 		guid,
 	).Scan(&id)
 	return id, err
